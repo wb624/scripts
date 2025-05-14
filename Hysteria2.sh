@@ -9,7 +9,8 @@ echo "使用端口: $HY2_PORT"
 
 # 下载并解压 Hysteria2 可执行文件
 echo "[1/6] 下载 Hysteria2 可执行文件..."
-wget -O hysteria.tar.gz https://github.com/apernet/hysteria/releases/latest/download/hysteria-linux-amd64.tar.gz
+wget -O /usr/local/bin/hysteria https://github.com/apernet/hysteria/releases/latest/download/hysteria-linux-amd64
+chmod +x /usr/local/bin/hysteria
 
 echo "[2/6] 解压并安装..."
 tar -xvzf hysteria.tar.gz
