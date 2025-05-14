@@ -106,4 +106,36 @@ cat << EOF
   sni: www.bing.com
   skip-cert-verify: true
   fast-open: true
+  #!/bin/bash
+
+set -e
+
+echo "=== 自动修复 Hysteria2 安装问题 ==="
+
+# 下载 Hysteria2 可执行文件
+echo "[1/4] 正在下载 Hysteria2 可执行文件..."
+wget -O hysteria.tar.gz https://github.com/apernet/hysteria/releases/latest/download/hysteria-linux-amd64.tar.gz
+
+echo "[2/4] 解压并移动到 /usr/local/bin..."
+tar -xvzf hysteria.tar.gz
+mv -f hysteria /usr/local/bin/hysteria
+chmod +x /usr/local/bin/hysteria
+rm -f hysteria.tar.gz
+
+# 修复 /etc/hosts 主机名解析问题
+echo "[3/4] 修复 /etc/hosts 主机名解析..."
+HOSTNAME=$(hostname)
+if ! grep -q "$HOSTNAME" /etc/hosts; then
+    echo "127.0.0.1    $HOSTNAME" >> /etc/hosts
+    echo "已添加主机名 $HOSTNAME 到 /etc/hosts"
+else
+    echo "/etc/hosts 中已存在主机名 $HOSTNAME，无需修改"
+fi
+
+# 重新启动服务
+echo "[4/4] 重启 hysteria-server 服务..."
+systemctl daemon-reexec
+systemctl restart hysteria-server.service
+
+echo "=== 修复完成，Hysteria2 应已正常运行 ==="
 EOF
