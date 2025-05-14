@@ -6,9 +6,9 @@ set -e
 [ -z "$HY2_PORT" ] && HY2_PORT=$(shuf -i 2000-65000 -n 1)
 [ -z "$PASSWD" ] && PASSWD=$(cat /proc/sys/kernel/random/uuid)
 
-# 检查是否为root
+# 检查是否为 root
 if [[ $EUID -ne 0 ]]; then
-  echo -e '\033[1;35m请以root权限运行脚本\033[0m'
+  echo -e '\033[1;35m请以 root 权限运行脚本\033[0m'
   exit 1
 fi
 
@@ -19,7 +19,6 @@ else
   SYSTEM=$(source /etc/os-release && echo $ID)
 fi
 
-# 安装依赖
 case $SYSTEM in
   debian|ubuntu)
     apt-get update && apt-get install -y curl wget openssl unzip
@@ -39,10 +38,10 @@ case $SYSTEM in
     ;;
 esac
 
-# 内核参数优化
-sysctl -w net.core.rmem_max=2500000
-sysctl -w net.core.wmem_max=2500000
-sysctl -w net.ipv4.tcp_fastopen=3
+# 网络优化参数（失败不退出）
+sysctl -w net.core.rmem_max=2500000 2>/dev/null || true
+sysctl -w net.core.wmem_max=2500000 2>/dev/null || true
+sysctl -w net.ipv4.tcp_fastopen=3 2>/dev/null || true
 
 # 创建配置目录
 mkdir -p /etc/hysteria
@@ -61,7 +60,7 @@ fi
 openssl req -x509 -nodes -newkey ec:<(openssl ecparam -name prime256v1) \
   -keyout /etc/hysteria/server.key \
   -out /etc/hysteria/server.crt \
-  -subj "/CN=cloudflare.com" -days 36500
+  -subj "/CN=bing.com" -days 36500
 
 chown root:root /etc/hysteria/server.key /etc/hysteria/server.crt
 
@@ -82,14 +81,12 @@ fastOpen: true
 masquerade:
   type: proxy
   proxy:
-    url: https://www.cloudflare.com
+    url: https://bing.com
     rewriteHost: true
 
 transport:
   udp:
-    hopInterval: 15s
-    recvWindowConn: true
-    disableUDPChecksum: true
+    hopInterval: 30s
 EOF
 
 # 写入 systemd 服务文件
@@ -113,7 +110,7 @@ systemctl daemon-reload
 systemctl enable hysteria-server
 systemctl restart hysteria-server
 
-# 验证运行状态
+# 验证是否成功运行
 sleep 1
 if ! systemctl is-active --quiet hysteria-server; then
   echo -e "\033[1;31m服务启动失败，请检查配置或日志。\033[0m"
@@ -121,7 +118,7 @@ if ! systemctl is-active --quiet hysteria-server; then
   exit 1
 fi
 
-# 获取公网IP
+# 获取公网 IP
 ipv4=$(curl -s ipv4.ip.sb)
 if [ -n "$ipv4" ]; then
     HOST_IP="$ipv4"
@@ -130,22 +127,22 @@ else
     if [ -n "$ipv6" ]; then
         HOST_IP="$ipv6"
     else
-        echo -e "\e[1;35m无法获取IPv4或IPv6地址\033[0m"
+        echo -e "\e[1;35m无法获取 IPv4 或 IPv6 地址\033[0m"
         exit 1
     fi
 fi
 
-# 获取ISP信息
+# 获取 ISP 信息
 ISP=$(curl -s https://speed.cloudflare.com/meta | awk -F\" '{print $26"-"$18}' | sed -e 's/ /_/g')
 
 # 输出连接信息
 echo -e "\e[1;32mHysteria2 安装并启动成功\033[0m"
 echo ""
 echo -e "\e[1;33mV2rayN / Nekobox:\033[0m"
-echo -e "\e[1;32mhysteria2://$PASSWD@$HOST_IP:$HY2_PORT/?sni=www.cloudflare.com&alpn=h3&insecure=1#$ISP\033[0m"
+echo -e "\e[1;32mhysteria2://$PASSWD@$HOST_IP:$HY2_PORT/?sni=www.bing.com&alpn=h3&insecure=1#$ISP\033[0m"
 echo ""
 echo -e "\e[1;33mSurge:\033[0m"
-echo -e "\e[1;32m$ISP = hysteria2, $HOST_IP, $HY2_PORT, password = $PASSWD, skip-cert-verify=true, sni=www.cloudflare.com\033[0m"
+echo -e "\e[1;32m$ISP = hysteria2, $HOST_IP, $HY2_PORT, password = $PASSWD, skip-cert-verify=true, sni=www.bing.com\033[0m"
 echo ""
 echo -e "\e[1;33mClash:\033[0m"
 cat << EOF
@@ -156,7 +153,7 @@ cat << EOF
   password: $PASSWD
   alpn:
     - h3
-  sni: www.cloudflare.com
+  sni: www.bing.com
   skip-cert-verify: true
   fast-open: true
 EOF
