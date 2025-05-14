@@ -1,50 +1,63 @@
 #!/bin/bash
 
+set -e
+
 # 随机生成端口和密码
 [ -z "$HY2_PORT" ] && HY2_PORT=$(shuf -i 2000-65000 -n 1)
 [ -z "$PASSWD" ] && PASSWD=$(cat /proc/sys/kernel/random/uuid)
 
-# 检查是否为root下运行
+# 检查是否为root
 if [[ $EUID -ne 0 ]]; then
   echo -e '\033[1;35m请以root权限运行脚本\033[0m'
   exit 1
 fi
 
-# 判断系统并安装依赖
-SYSTEM=$(source /etc/os-release && echo $ID)
+# 检测系统类型
+if [ -f /etc/alpine-release ]; then
+  SYSTEM="alpine"
+else
+  SYSTEM=$(source /etc/os-release && echo $ID)
+fi
+
 case $SYSTEM in
   debian|ubuntu)
-    package_install="apt-get update && apt-get install -y"
+    apt-get update && apt-get install -y curl wget openssl unzip
     ;;
   centos|rhel|oracle)
-    package_install="yum install -y"
+    yum install -y curl wget openssl unzip
     ;;
   fedora|rocky|almalinux)
-    package_install="dnf install -y"
+    dnf install -y curl wget openssl unzip
     ;;
   alpine)
-    package_install="apk add --no-cache"
+    apk add --no-cache curl wget openssl unzip
     ;;
   *)
-    echo -e '\033[1;35m暂不支持的系统！\033[0m'
+    echo -e '\033[1;35m暂不支持的系统类型：'$SYSTEM'\033[0m'
     exit 1
     ;;
 esac
-$package_install openssl unzip wget curl
-
-# 安装Hysteria2
-bash <(curl -fsSL https://get.hy2.sh/)
 
 # 创建配置目录
 mkdir -p /etc/hysteria
 
-# 生成自签证书
+# 下载 Hysteria2 可执行文件（适用于 x86_64）
+ARCH=$(uname -m)
+BIN_PATH="/usr/local/bin/hysteria"
+
+if [ ! -f "$BIN_PATH" ]; then
+  echo -e "\033[1;33m正在下载 Hysteria 可执行文件...\033[0m"
+  wget -O "$BIN_PATH" https://github.com/apernet/hysteria/releases/latest/download/hysteria-linux-amd64
+  chmod +x "$BIN_PATH"
+fi
+
+# 创建自签证书
 openssl req -x509 -nodes -newkey ec:<(openssl ecparam -name prime256v1) \
   -keyout /etc/hysteria/server.key \
   -out /etc/hysteria/server.crt \
   -subj "/CN=bing.com" -days 36500
 
-chown hysteria:hysteria /etc/hysteria/server.key /etc/hysteria/server.crt
+chown root:root /etc/hysteria/server.key /etc/hysteria/server.crt
 
 # 写入配置文件
 cat << EOF > /etc/hysteria/config.yaml
@@ -71,11 +84,36 @@ transport:
     hopInterval: 30s
 EOF
 
-# 启动Hysteria2
-systemctl restart hysteria-server
-systemctl enable hysteria-server
+# 写入 systemd 服务文件
+cat << EOF > /etc/systemd/system/hysteria-server.service
+[Unit]
+Description=Hysteria2 Server
+After=network.target
 
-# 获取本机IP地址
+[Service]
+ExecStart=/usr/local/bin/hysteria server -c /etc/hysteria/config.yaml
+Restart=always
+User=root
+LimitNOFILE=65535
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+# 重新加载并启动服务
+systemctl daemon-reload
+systemctl enable hysteria-server
+systemctl restart hysteria-server
+
+# 验证是否成功运行
+sleep 1
+if ! systemctl is-active --quiet hysteria-server; then
+  echo -e "\033[1;31m服务启动失败，请检查配置或日志。\033[0m"
+  journalctl -u hysteria-server --no-pager | tail -n 20
+  exit 1
+fi
+
+# 获取公网IP
 ipv4=$(curl -s ipv4.ip.sb)
 if [ -n "$ipv4" ]; then
     HOST_IP="$ipv4"
@@ -88,21 +126,20 @@ else
         exit 1
     fi
 fi
-echo -e "\e[1;32m本机IP: $HOST_IP\033[0m"
 
 # 获取ISP信息
 ISP=$(curl -s https://speed.cloudflare.com/meta | awk -F\" '{print $26"-"$18}' | sed -e 's/ /_/g')
 
 # 输出连接信息
-echo -e "\e[1;32mHysteria2安装成功\033[0m"
+echo -e "\e[1;32mHysteria2 安装并启动成功\033[0m"
 echo ""
-echo -e "\e[1;33mV2rayN / Nekobox 配置:\033[0m"
+echo -e "\e[1;33mV2rayN / Nekobox:\033[0m"
 echo -e "\e[1;32mhysteria2://$PASSWD@$HOST_IP:$HY2_PORT/?sni=www.bing.com&alpn=h3&insecure=1#$ISP\033[0m"
 echo ""
-echo -e "\e[1;33mSurge 配置:\033[0m"
+echo -e "\e[1;33mSurge:\033[0m"
 echo -e "\e[1;32m$ISP = hysteria2, $HOST_IP, $HY2_PORT, password = $PASSWD, skip-cert-verify=true, sni=www.bing.com\033[0m"
 echo ""
-echo -e "\e[1;33mClash 配置:\033[0m"
+echo -e "\e[1;33mClash:\033[0m"
 cat << EOF
 - name: $ISP
   type: hysteria2
