@@ -6,9 +6,9 @@ set -e
 [ -z "$HY2_PORT" ] && HY2_PORT=$(shuf -i 2000-65000 -n 1)
 [ -z "$PASSWD" ] && PASSWD=$(cat /proc/sys/kernel/random/uuid)
 
-# 检查是否为 root
+# 检查是否为root
 if [[ $EUID -ne 0 ]]; then
-  echo -e '\033[1;35m请以 root 权限运行脚本\033[0m'
+  echo -e '\033[1;35m请以root权限运行脚本\033[0m'
   exit 1
 fi
 
@@ -37,11 +37,6 @@ case $SYSTEM in
     exit 1
     ;;
 esac
-
-# 网络优化参数（失败不退出）
-sysctl -w net.core.rmem_max=2500000 2>/dev/null || true
-sysctl -w net.core.wmem_max=2500000 2>/dev/null || true
-sysctl -w net.ipv4.tcp_fastopen=3 2>/dev/null || true
 
 # 创建配置目录
 mkdir -p /etc/hysteria
@@ -89,8 +84,14 @@ transport:
     hopInterval: 30s
 EOF
 
-# 写入 systemd 服务文件
-cat << EOF > /etc/systemd/system/hysteria-server.service
+# 跳过 sysctl 设置错误，避免失败
+sysctl -w net.core.rmem_max=16777216 || true
+sysctl -w net.core.wmem_max=16777216 || true
+sysctl -w net.ipv4.tcp_fastopen=3 || true
+
+# 写入 systemd 服务文件（如果支持 systemd）
+if command -v systemctl >/dev/null 2>&1; then
+  cat << EOF > /etc/systemd/system/hysteria-server.service
 [Unit]
 Description=Hysteria2 Server
 After=network.target
@@ -105,20 +106,24 @@ LimitNOFILE=65535
 WantedBy=multi-user.target
 EOF
 
-# 启动服务
-systemctl daemon-reload
-systemctl enable hysteria-server
-systemctl restart hysteria-server
+  # 重新加载并启动服务
+  systemctl daemon-reload
+  systemctl enable hysteria-server
+  systemctl restart hysteria-server
 
-# 验证是否成功运行
-sleep 1
-if ! systemctl is-active --quiet hysteria-server; then
-  echo -e "\033[1;31m服务启动失败，请检查配置或日志。\033[0m"
-  journalctl -u hysteria-server --no-pager | tail -n 20
-  exit 1
+  # 验证是否成功运行
+  sleep 1
+  if ! systemctl is-active --quiet hysteria-server; then
+    echo -e "\033[1;31m服务启动失败，请检查配置或日志。\033[0m"
+    journalctl -u hysteria-server --no-pager | tail -n 20
+    exit 1
+  fi
+else
+  # 如果没有 systemd，使用 nohup 运行
+  nohup /usr/local/bin/hysteria server -c /etc/hysteria/config.yaml &
 fi
 
-# 获取公网 IP
+# 获取公网IP
 ipv4=$(curl -s ipv4.ip.sb)
 if [ -n "$ipv4" ]; then
     HOST_IP="$ipv4"
@@ -127,12 +132,12 @@ else
     if [ -n "$ipv6" ]; then
         HOST_IP="$ipv6"
     else
-        echo -e "\e[1;35m无法获取 IPv4 或 IPv6 地址\033[0m"
+        echo -e "\e[1;35m无法获取IPv4或IPv6地址\033[0m"
         exit 1
     fi
 fi
 
-# 获取 ISP 信息
+# 获取ISP信息
 ISP=$(curl -s https://speed.cloudflare.com/meta | awk -F\" '{print $26"-"$18}' | sed -e 's/ /_/g')
 
 # 输出连接信息
