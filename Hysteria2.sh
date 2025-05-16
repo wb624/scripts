@@ -1,65 +1,38 @@
 #!/bin/bash
-
 set -e
 
-# 使用常规 HTTPS 端口，更容易混淆
-HY2_PORT=443
+[ -z "$HY2_PORT" ] && HY2_PORT=23333
 [ -z "$PASSWD" ] && PASSWD=$(cat /proc/sys/kernel/random/uuid)
 
-# 检查是否为root
 if [[ $EUID -ne 0 ]]; then
   echo -e '\033[1;35m请以root权限运行脚本\033[0m'
   exit 1
 fi
 
-# 检测系统类型
 if [ -f /etc/alpine-release ]; then
-  SYSTEM="alpine"
+  SYS="alpine"
 else
-  SYSTEM=$(source /etc/os-release && echo $ID)
+  SYS=$(source /etc/os-release && echo $ID)
 fi
 
-case $SYSTEM in
-  debian|ubuntu)
-    apt-get update && apt-get install -y curl wget openssl unzip
-    ;;
-  centos|rhel|oracle)
-    yum install -y curl wget openssl unzip
-    ;;
-  fedora|rocky|almalinux)
-    dnf install -y curl wget openssl unzip
-    ;;
-  alpine)
-    apk add --no-cache curl wget openssl unzip
-    ;;
-  *)
-    echo -e '\033[1;35m暂不支持的系统类型：'$SYSTEM'\033[0m'
-    exit 1
-    ;;
+case $SYS in
+  debian|ubuntu) apt-get update && apt-get install -y curl wget openssl unzip ;;
+  centos|rhel|oracle) yum install -y curl wget openssl unzip ;;
+  fedora|rocky|almalinux) dnf install -y curl wget openssl unzip ;;
+  alpine) apk add --no-cache curl wget openssl unzip ;;
+  *) echo -e '\033[1;35m不支持的系统：'$SYS'\033[0m'; exit 1 ;;
 esac
 
-# 创建配置目录
 mkdir -p /etc/hysteria
-
-# 下载 Hysteria2 可执行文件（适用于 x86_64）
 ARCH=$(uname -m)
 BIN_PATH="/usr/local/bin/hysteria"
+[ ! -f "$BIN_PATH" ] && wget -O "$BIN_PATH" https://github.com/apernet/hysteria/releases/latest/download/hysteria-linux-amd64 && chmod +x "$BIN_PATH"
 
-if [ ! -f "$BIN_PATH" ]; then
-  echo -e "\033[1;33m正在下载 Hysteria 可执行文件...\033[0m"
-  wget -O "$BIN_PATH" https://github.com/apernet/hysteria/releases/latest/download/hysteria-linux-amd64
-  chmod +x "$BIN_PATH"
-fi
-
-# 创建自签证书
 openssl req -x509 -nodes -newkey ec:<(openssl ecparam -name prime256v1) \
   -keyout /etc/hysteria/server.key \
   -out /etc/hysteria/server.crt \
-  -subj "/CN=www.cloudflare.com" -days 36500
+  -subj "/CN=cloudflare.com" -days 36500
 
-chown root:root /etc/hysteria/server.key /etc/hysteria/server.crt
-
-# 写入配置文件
 cat << EOF > /etc/hysteria/config.yaml
 listen: :$HY2_PORT
 
@@ -84,14 +57,12 @@ transport:
     hopInterval: 30s
 EOF
 
-# 跳过 sysctl 设置错误
 sysctl -w net.core.rmem_max=16777216 || true
 sysctl -w net.core.wmem_max=16777216 || true
 sysctl -w net.ipv4.tcp_fastopen=3 || true
 
-# 写入 systemd 服务文件（如果支持）
 if command -v systemctl >/dev/null 2>&1; then
-  cat << EOF > /etc/systemd/system/hysteria-server.service
+cat << EOF > /etc/systemd/system/hysteria-server.service
 [Unit]
 Description=Hysteria2 Server
 After=network.target
@@ -105,14 +76,12 @@ LimitNOFILE=65535
 [Install]
 WantedBy=multi-user.target
 EOF
-
   systemctl daemon-reload
   systemctl enable hysteria-server
   systemctl restart hysteria-server
-
   sleep 1
   if ! systemctl is-active --quiet hysteria-server; then
-    echo -e "\033[1;31m服务启动失败，请检查配置或日志。\033[0m"
+    echo -e "\033[1;31m服务启动失败，请检查日志。\033[0m"
     journalctl -u hysteria-server --no-pager | tail -n 20
     exit 1
   fi
@@ -120,31 +89,18 @@ else
   nohup /usr/local/bin/hysteria server -c /etc/hysteria/config.yaml &
 fi
 
-# 获取公网IP
 ipv4=$(curl -s ipv4.ip.sb)
-if [ -n "$ipv4" ]; then
-    HOST_IP="$ipv4"
-else
-    ipv6=$(curl -s --max-time 1 ipv6.ip.sb)
-    if [ -n "$ipv6" ]; then
-        HOST_IP="$ipv6"
-    else
-        echo -e "\e[1;35m无法获取IPv4或IPv6地址\033[0m"
-        exit 1
-    fi
-fi
+[ -n "$ipv4" ] && HOST_IP="$ipv4" || HOST_IP=$(curl -s --max-time 1 ipv6.ip.sb)
+[ -z "$HOST_IP" ] && echo -e "\e[1;35m无法获取IP地址\033[0m" && exit 1
 
-# 获取ISP信息
-ISP=$(curl -s https://speed.cloudflare.com/meta | awk -F\" '{print $26"-"$18}' | sed -e 's/ /_/g')
+ISP=$(curl -s https://speed.cloudflare.com/meta | awk -F\" '{print $26"-"$18}' | sed 's/ /_/g')
 
-# 输出连接信息
-echo -e "\e[1;32mHysteria2 安装并启动成功\033[0m"
-echo ""
+echo -e "\e[1;32mHysteria2 已启动，信息如下：\033[0m"
 echo -e "\e[1;33mV2rayN / Nekobox:\033[0m"
-echo -e "\e[1;32mhysteria2://$PASSWD@$HOST_IP:$HY2_PORT/?sni=www.google.com&alpn=h3&insecure=1#$ISP\033[0m"
+echo -e "\e[1;32mhysteria2://$PASSWD@$HOST_IP:$HY2_PORT/?sni=www.cloudflare.com&alpn=h3&insecure=1#$ISP\033[0m"
 echo ""
 echo -e "\e[1;33mSurge:\033[0m"
-echo -e "\e[1;32m$ISP = hysteria2, $HOST_IP, $HY2_PORT, password = $PASSWD, skip-cert-verify=true, sni=www.google.com\033[0m"
+echo -e "\e[1;32m$ISP = hysteria2, $HOST_IP, $HY2_PORT, password = $PASSWD, skip-cert-verify=true, sni=www.cloudflare.com\033[0m"
 echo ""
 echo -e "\e[1;33mClash:\033[0m"
 cat << EOF
@@ -155,7 +111,7 @@ cat << EOF
   password: $PASSWD
   alpn:
     - h3
-  sni: www.google.com
+  sni: www.cloudflare.com
   skip-cert-verify: true
   fast-open: true
 EOF
