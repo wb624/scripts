@@ -2,8 +2,8 @@
 
 set -e
 
-# 随机生成端口和密码
-[ -z "$HY2_PORT" ] && HY2_PORT=$(shuf -i 2000-65000 -n 1)
+# 使用常规 HTTPS 端口，更容易混淆
+HY2_PORT=443
 [ -z "$PASSWD" ] && PASSWD=$(cat /proc/sys/kernel/random/uuid)
 
 # 检查是否为root
@@ -55,7 +55,7 @@ fi
 openssl req -x509 -nodes -newkey ec:<(openssl ecparam -name prime256v1) \
   -keyout /etc/hysteria/server.key \
   -out /etc/hysteria/server.crt \
-  -subj "/CN=bing.com" -days 36500
+  -subj "/CN=www.cloudflare.com" -days 36500
 
 chown root:root /etc/hysteria/server.key /etc/hysteria/server.crt
 
@@ -76,7 +76,7 @@ fastOpen: true
 masquerade:
   type: proxy
   proxy:
-    url: https://bing.com
+    url: https://www.cloudflare.com
     rewriteHost: true
 
 transport:
@@ -84,12 +84,12 @@ transport:
     hopInterval: 30s
 EOF
 
-# 跳过 sysctl 设置错误，避免失败
+# 跳过 sysctl 设置错误
 sysctl -w net.core.rmem_max=16777216 || true
 sysctl -w net.core.wmem_max=16777216 || true
 sysctl -w net.ipv4.tcp_fastopen=3 || true
 
-# 写入 systemd 服务文件（如果支持 systemd）
+# 写入 systemd 服务文件（如果支持）
 if command -v systemctl >/dev/null 2>&1; then
   cat << EOF > /etc/systemd/system/hysteria-server.service
 [Unit]
@@ -106,12 +106,10 @@ LimitNOFILE=65535
 WantedBy=multi-user.target
 EOF
 
-  # 重新加载并启动服务
   systemctl daemon-reload
   systemctl enable hysteria-server
   systemctl restart hysteria-server
 
-  # 验证是否成功运行
   sleep 1
   if ! systemctl is-active --quiet hysteria-server; then
     echo -e "\033[1;31m服务启动失败，请检查配置或日志。\033[0m"
@@ -119,7 +117,6 @@ EOF
     exit 1
   fi
 else
-  # 如果没有 systemd，使用 nohup 运行
   nohup /usr/local/bin/hysteria server -c /etc/hysteria/config.yaml &
 fi
 
@@ -144,10 +141,10 @@ ISP=$(curl -s https://speed.cloudflare.com/meta | awk -F\" '{print $26"-"$18}' |
 echo -e "\e[1;32mHysteria2 安装并启动成功\033[0m"
 echo ""
 echo -e "\e[1;33mV2rayN / Nekobox:\033[0m"
-echo -e "\e[1;32mhysteria2://$PASSWD@$HOST_IP:$HY2_PORT/?sni=www.bing.com&alpn=h3&insecure=1#$ISP\033[0m"
+echo -e "\e[1;32mhysteria2://$PASSWD@$HOST_IP:$HY2_PORT/?sni=www.google.com&alpn=h3&insecure=1#$ISP\033[0m"
 echo ""
 echo -e "\e[1;33mSurge:\033[0m"
-echo -e "\e[1;32m$ISP = hysteria2, $HOST_IP, $HY2_PORT, password = $PASSWD, skip-cert-verify=true, sni=www.bing.com\033[0m"
+echo -e "\e[1;32m$ISP = hysteria2, $HOST_IP, $HY2_PORT, password = $PASSWD, skip-cert-verify=true, sni=www.google.com\033[0m"
 echo ""
 echo -e "\e[1;33mClash:\033[0m"
 cat << EOF
@@ -158,7 +155,7 @@ cat << EOF
   password: $PASSWD
   alpn:
     - h3
-  sni: www.bing.com
+  sni: www.google.com
   skip-cert-verify: true
   fast-open: true
 EOF
