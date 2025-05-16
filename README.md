@@ -20,7 +20,7 @@ PORT,NEZHA_SERVER,NEZHA_PORT,NEZHA_KEY can be customized
 ## Hysteria2
 The HY2_PORT can be customized,Removing HY2_PORT=8880 it will use a random port
 ```
-HY2_PORT=3633 bash <(curl -Ls https://raw.githubusercontent.com/wb624/scripts/master/Hysteria2.sh)
+HY2_PORT=23333 bash <(curl -Ls https://raw.githubusercontent.com/wb624/scripts/master/Hysteria2.sh)
 ```
 
 ## Tuic-v5
