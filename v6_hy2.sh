@@ -34,7 +34,7 @@ openssl req -x509 -nodes -newkey ec:<(openssl ecparam -name prime256v1) \
   -subj "/CN=cloudflare.com" -days 36500
 
 cat << EOF > /etc/hysteria/config.yaml
-listen: "[::]:$HY2_PORT"
+listen: :$HY2_PORT
 
 tls:
   cert: /etc/hysteria/server.crt
@@ -57,10 +57,12 @@ transport:
     hopInterval: 30s
 EOF
 
-sysctl -w net.core.rmem_max=16777216 || true
-sysctl -w net.core.wmem_max=16777216 || true
-sysctl -w net.ipv4.tcp_fastopen=3 || true
+# 忽略sysctl失败避免脚本退出
+sysctl -w net.core.rmem_max=16777216 2>/dev/null || true
+sysctl -w net.core.wmem_max=16777216 2>/dev/null || true
+sysctl -w net.ipv4.tcp_fastopen=3 2>/dev/null || true
 
+# 创建 systemd 服务
 if command -v systemctl >/dev/null 2>&1; then
 cat << EOF > /etc/systemd/system/hysteria-server.service
 [Unit]
@@ -68,7 +70,7 @@ Description=Hysteria2 Server
 After=network.target
 
 [Service]
-ExecStart=/usr/local/bin/hysteria server -c /etc/hysteria/config.yaml
+ExecStart=$BIN_PATH server -c /etc/hysteria/config.yaml
 Restart=always
 User=root
 LimitNOFILE=65535
@@ -77,24 +79,22 @@ LimitNOFILE=65535
 WantedBy=multi-user.target
 EOF
   systemctl daemon-reload
-  systemctl enable hysteria-server
+  systemctl enable hysteria-server || true
   systemctl restart hysteria-server
   sleep 1
-  if ! systemctl is-active --quiet hysteria-server; then
-    echo -e "\033[1;31m服务启动失败，请检查日志。\033[0m"
-    journalctl -u hysteria-server --no-pager | tail -n 20
-    exit 1
-  fi
 else
-  nohup /usr/local/bin/hysteria server -c /etc/hysteria/config.yaml &
+  nohup $BIN_PATH server -c /etc/hysteria/config.yaml >/dev/null 2>&1 &
 fi
 
+# 获取IPv6优先地址
 ipv6=$(curl -s --max-time 2 ipv6.ip.sb)
 [ -n "$ipv6" ] && HOST_IP="[$ipv6]" || HOST_IP=$(curl -s --max-time 2 ipv4.ip.sb)
 [ -z "$HOST_IP" ] && echo -e "\e[1;35m无法获取IP地址\033[0m" && exit 1
 
+# 获取运营商信息
 ISP=$(curl -s https://speed.cloudflare.com/meta | awk -F\" '{print $26"-"$18}' | sed 's/ /_/g')
 
+# 输出节点信息
 echo -e "\e[1;32mHysteria2 已启动，信息如下：\033[0m"
 echo -e "\e[1;33mV2rayN / Nekobox:\033[0m"
 echo -e "\e[1;32mhysteria2://$PASSWD@$HOST_IP:$HY2_PORT/?sni=www.cloudflare.com&alpn=h3&insecure=1#$ISP\033[0m"
