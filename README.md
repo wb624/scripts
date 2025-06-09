@@ -25,7 +25,7 @@ HY2_PORT=23333 bash <(curl -Ls https://raw.githubusercontent.com/wb624/scripts/m
 
 ## Tuic-v5
 ```
-bash <(curl -Ls https://raw.githubusercontent.com/eooce/scripts/master/tuic.sh)
+bash <(curl -Ls https://raw.githubusercontent.com/wb624/scripts/master/tuic.sh)
 ```
 
 ## Juicity
