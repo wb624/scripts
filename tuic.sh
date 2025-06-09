@@ -22,8 +22,7 @@ case "$ARCH" in
   *) echo "Unsupported architecture: $ARCH" && exit 1 ;;
 esac
 
-LATEST_URL="https://github.com/EAimTY/tuic/releases/download/v5.0.1/tuic-server-linux-${ARCH_NAME}.tar.gz"
-
+LATEST_URL="https://github.com/tuic-protocol/tuic/releases/download/v5.0.1/tuic-server-linux-${ARCH_NAME}.tar.gz"
 wget -O tuic.tar.gz "$LATEST_URL"
 tar -xzf tuic.tar.gz
 chmod +x tuic-server
