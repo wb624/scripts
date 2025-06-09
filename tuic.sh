@@ -30,16 +30,16 @@ tar -xzf tuic.tar.gz
 chmod +x tuic-server
 rm tuic.tar.gz
 
-# ===== 生成 ECDSA 证书 =====
+# ===== 生成 ECDSA 证书（伪造为 cloudflare）=====
 openssl ecparam -genkey -name prime256v1 -out server.key
-openssl req -new -x509 -key server.key -out server.crt -days 3650 -subj "/CN=bing.com"
+openssl req -new -x509 -key server.key -out server.crt -days 3650 -subj "/CN=cdn.cloudflare.com"
 
-# ===== 优化 MTU 探测 =====
+# ===== 获取当前网卡 MTU 值并调整 =====
 IFACE=$(ip route get 1.1.1.1 | awk '{print $5; exit}')
 MTU=$(ip link show "$IFACE" | grep -oP 'mtu \K[0-9]+')
-MTU=$((MTU - 40))  # 适用于 IPv6，IPv4 可改成 -28
+MTU=$((MTU - 40))  # IPv6 常规头部开销
 
-# ===== 写入 TUIC 配置 =====
+# ===== 写入 TUIC 配置文件 =====
 cat > config.json <<EOF
 {
   "server": "[::]:$PORT",
@@ -51,7 +51,8 @@ cat > config.json <<EOF
   "congestion_control": "bbr",
   "alpn": ["h3"],
   "udp_relay_ipv6": true,
-  "zero_rtt_handshake": false,
+  "zero_rtt_handshake": true,
+  "disable_sni": true,
   "dual_stack": true,
   "auth_timeout": "2s",
   "task_negotiation_timeout": "2s",
@@ -59,11 +60,16 @@ cat > config.json <<EOF
   "max_external_packet_size": $MTU,
   "gc_interval": "3s",
   "gc_lifetime": "10s",
+  "heartbeat": {
+    "enabled": true,
+    "interval": 15,
+    "timeout": 10
+  },
   "log_level": "$LOG_LEVEL"
 }
 EOF
 
-# ===== 写入 systemd 启动文件 =====
+# ===== 写入 systemd 启动服务配置 =====
 cat > /etc/systemd/system/tuic.service <<EOF
 [Unit]
 Description=TUIC Server
@@ -79,7 +85,7 @@ RestartSec=5
 WantedBy=multi-user.target
 EOF
 
-# ===== 启用 BBR 优化 =====
+# ===== 启用 BBR 拥塞控制器 =====
 sysctl -w net.core.default_qdisc=fq
 sysctl -w net.ipv4.tcp_congestion_control=bbr
 
@@ -104,5 +110,8 @@ echo "UUID: $UUID"
 echo "密码: $PASSWORD"
 echo "拥塞控制: bbr"
 echo "ALPN: h3"
+echo "Zero-RTT: 已启用"
+echo "SNI: 已禁用"
+echo "模拟 CN: cdn.cloudflare.com"
 echo "最大MTU: $MTU"
 echo "================================"
