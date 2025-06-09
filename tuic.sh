@@ -1,27 +1,48 @@
+cat > deploy-tuic.sh << 'EOF'
 #!/bin/bash
 set -e
-0-2PORT=${PORT:-3633} 
-0-3UUID=$(cat /proc/sys/kernel/random/uuid) 
-0-4PASSWORD=$(openssl rand -hex 16) 
+
+# —— 可自定义 —— 
+PORT=${PORT:-3633}
+UUID=$(cat /proc/sys/kernel/random/uuid)
+PASSWORD=$(openssl rand -hex 16)
 LOG_LEVEL="warn"
-0-5apt update -y && apt install -y curl wget jq openssl 
-0-6mkdir -p /root/tuic && cd /root/tuic 
-0-7ARCH=$(uname -m) 
-0-8if [ "$ARCH" = "x86_64" ]; then FILE="tuic-server-1.0.0-x86_64-unknown-linux-gnu"; fi 
-0-9if [ "$ARCH" = "aarch64" ]; then FILE="tuic-server-1.0.0-aarch64-unknown-linux-gnu"; fi 
-0-10wget -O tuic-server "https://github.com/tuic-protocol/tuic/releases/download/tuic-1.0.0/${FILE}" 
-0-11chmod +x tuic-server 
-0-12openssl ecparam -genkey -name prime256v1 -out server.key 
-0-13openssl req -new -x509 -key server.key -out server.crt -days 3650 -subj "/CN=cdn.cloudflare.com" 
-0-14IFACE=$(ip route get 1.1.1.1 | awk '{print $5;exit}') 
-0-15MTU=$(ip link show "$IFACE" | grep -oP 'mtu  \K[0-9]+')
-0-16MTU=$((MTU-40)) 
-0-17cat > config.json <<EOF 
+
+# —— 安装依赖 —— 
+apt update -y
+apt install -y curl wget jq openssl
+
+# —— 下载 TUIC 执行文件 —— 
+mkdir -p /root/tuic && cd /root/tuic
+ARCH=$(uname -m)
+if [ "$ARCH" = "x86_64" ]; then
+  FILE="tuic-server-1.0.0-x86_64-unknown-linux-gnu"
+elif [ "$ARCH" = "aarch64" ]; then
+  FILE="tuic-server-1.0.0-aarch64-unknown-linux-gnu"
+else
+  echo "Unsupported architecture: $ARCH"
+  exit 1
+fi
+wget -O tuic-server "https://github.com/tuic-protocol/tuic/releases/download/tuic-1.0.0/${FILE}"
+chmod +x tuic-server
+
+# —— 生成伪装 TLS 证书 —— 
+openssl ecparam -genkey -name prime256v1 -out server.key
+openssl req -new -x509 -key server.key -out server.crt -days 3650 \
+  -subj "/CN=cdn.cloudflare.com"
+
+# —— 自动探测 MTU —— 
+IFACE=$(ip route get 1.1.1.1 | awk '{print $5; exit}')
+MTU=$(ip link show "$IFACE" | grep -oP 'mtu \K[0-9]+')
+MTU=$((MTU - 40))
+
+# —— 生成 config.json —— 
+cat > config.json <<JSON
 {
   "server": "[::]:$PORT",
-  0-18"users": {"$UUID":"$PASSWORD"}, 
-  0-19"certificate": "/root/tuic/server.crt", 
-  0-20"private_key": "/root/tuic/server.key", 
+  "users": {"$UUID":"$PASSWORD"},
+  "certificate": "/root/tuic/server.crt",
+  "private_key": "/root/tuic/server.key",
   "congestion_control": "bbr",
   "alpn": ["h3"],
   "udp_relay_ipv6": true,
@@ -34,35 +55,43 @@ LOG_LEVEL="warn"
   "max_external_packet_size": $MTU,
   "gc_interval": "3s",
   "gc_lifetime": "10s",
-  0-21"heartbeat": {"enabled":true,"interval":15,"timeout":10}, 
+  "heartbeat": {"enabled":true,"interval":15,"timeout":10},
   "log_level": "$LOG_LEVEL"
 }
-EOF
-0-22cat > /etc/systemd/system/tuic.service <<EOF 
+JSON
+
+# —— 创建 systemd 服务 —— 
+cat > /etc/systemd/system/tuic.service <<SERVICE
 [Unit]
-0-23Description=TUIC v5 Server 
-0-24After=network.target 
+Description=TUIC v5 Server
+After=network.target
 
 [Service]
-0-25ExecStart=/root/tuic/tuic-server -c /root/tuic/config.json 
-0-26Restart=on-failure 
-RestartSec=5
+ExecStart=/root/tuic/tuic-server -c /root/tuic/config.json
+Restart=on-failure
+RestartSec=5s
 
 [Install]
-0-27WantedBy=multi-user.target 
-EOF
-0-28sysctl -w net.core.default_qdisc=fq 
-0-29sysctl -w net.ipv4.tcp_congestion_control=bbr 
-0-30systemctl daemon-reload 
-0-31systemctl enable tuic 
-0-32systemctl restart tuic 
+WantedBy=multi-user.target
+SERVICE
 
+# —— 启用 BBR 拥塞控制 —— 
+sysctl -w net.core.default_qdisc=fq
+sysctl -w net.ipv4.tcp_congestion_control=bbr
+
+# —— 启动服务 —— 
+systemctl daemon-reload
+systemctl enable tuic
+systemctl restart tuic
+
+# —— 输出结果 —— 
 echo
-0-33echo "✅ TUIC Server 已启动！" 
-0-34echo "地址: YOUR_DOMAIN:$PORT" 
-0-35echo "UUID:   $UUID" 
-0-36echo "密码:   $PASSWORD" 
-0-37echo "ALPN:    h3 | SNI: disabled | Zero‑RTT: enabled" 
-0-38echo "MTU:     $MTU" 
-0-39echo "TLS CN:  cdn.cloudflare.com" 
+echo "✅ TUIC Server 已启动！"
+echo "地址: YOUR_DOMAIN:$PORT"
+echo "UUID:   $UUID"
+echo "密码:   $PASSWORD"
+echo "ALPN:    h3 | SNI: disabled | Zero-RTT: enabled"
+echo "MTU:     $MTU"
+echo "TLS CN:  cdn.cloudflare.com"
 echo
+EOF
