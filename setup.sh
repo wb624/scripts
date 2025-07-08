@@ -17,21 +17,20 @@ curl -L -o /usr/local/bin/hysteria \
   https://github.com/apernet/hysteria/releases/latest/download/hysteria-linux-amd64
 chmod +x /usr/local/bin/hysteria
 
-# ========== 安装 Sing-box ==========
-SINGBOX_VER=$(curl -s https://api.github.com/repos/SagerNet/sing-box/releases/latest | grep tag_name | cut -d '"' -f4)
-curl -LO https://github.com/SagerNet/sing-box/releases/download/${SINGBOX_VER}/sing-box-${SINGBOX_VER#v}-linux-amd64.tar.gz
-tar -xzf sing-box-*.tar.gz
-mv sing-box-*/sing-box /usr/local/bin/
-chmod +x /usr/local/bin/sing-box
-rm -rf sing-box-*tar.gz sing-box-*/
-
-# ========== 安装 cloudflared ==========
-curl -L -o cloudflared.tgz \
-  https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64.tgz
-tar -xzf cloudflared.tgz
-mv cloudflared /usr/local/bin/
-chmod +x /usr/local/bin/cloudflared
-rm cloudflared.tgz
+# 下载并安装 sing-box,cloudflared
+install_singbox() {
+    clear
+    purple "正在安装sing-box中，请稍后..."
+    # 判断系统架构
+    ARCH_RAW=$(uname -m)
+    case "${ARCH_RAW}" in
+        'x86_64') ARCH='amd64' ;;
+        'x86' | 'i686' | 'i386') ARCH='386' ;;
+        'aarch64' | 'arm64') ARCH='arm64' ;;
+        'armv7l') ARCH='armv7' ;;
+        's390x') ARCH='s390x' ;;
+        *) red "不支持的架构: ${ARCH_RAW}"; exit 1 ;;
+    esac
 
 # ========== 配置 systemd 服务 =========#
 ## cloudflared (Argo) ##
