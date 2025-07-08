@@ -39,7 +39,11 @@ systemctl daemon-reexec systemctl daemon-reload systemctl enable sing-box system
 
 开放端口
 
-ufw allow 443/tcp ufw allow 1443/tcp
+ufw allow 443/tcp || true ufw allow 1443/tcp || true
 
-echo "\n✅ sing-box 已成功部署 (hy2 + tuic)！" echo "  - HY2 端口: 443" echo "  - TUIC v5 端口: 1443" echo "  - 自签 TLS 已生成于 /etc/sing-box/certs/" echo "\n📂 客户端配置将随后提供。"
+输出客户端配置文件
+
+cat > /etc/sing-box/nekobox-client.json << EOF { "log": { "level": "info", "output": "console" }, "outbounds": [ { "type": "hy2", "tag": "hy2-out", "server": "$DOMAIN", "server_port": 443, "uuid": "$HY2_UUID", "tls": { "enabled": true, "insecure": true, "server_name": "$DOMAIN" } }, { "type": "tuic", "tag": "tuic-out", "server": "$DOMAIN", "server_port": 1443, "uuid": "$TUIC_UUID", "password": "$TUIC_TOKEN", "congestion_control": "bbr", "tls": { "enabled": true, "insecure": true, "server_name": "$DOMAIN", "alpn": ["h3"] } } ], "inbounds": [ { "type": "tun", "tag": "tun-in", "interface_name": "tun0", "inet4_address": "172.19.0.1/30", "auto_route": true, "strict_route": false, "stack": "system", "dns": { "hijack": ["any:53"], "fakeip": { "enabled": true, "dns64": false } } } ], "dns": { "servers": [ { "tag": "remote", "address": "https://8.8.8.8/dns-query", "detour": "direct" }, "local", "fakeip" ], "rules": [ { "domain_suffix": "lan", "server": "local" } ] }, "route": { "rules": [ { "ip_cidr": ["0.0.0.0/0", "::/0"], "outbound": "hy2-out" } ] } } EOF
+
+echo -e "\n✅ sing-box 已成功部署 (hy2 + tuic)！" echo "  - HY2 端口: 443 (uuid: $HY2_UUID)" echo "  - TUIC 端口: 1443 (uuid: $TUIC_UUID, token: $TUIC_TOKEN)" echo "  - 自签 TLS 位于: /etc/sing-box/certs/" echo "  - NekoBox 客户端配置已输出到: /etc/sing-box/nekobox-client.json"
 
