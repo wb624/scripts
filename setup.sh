@@ -1,139 +1,45 @@
-#!/bin/bash
-set -e
+#!/bin/bash set -e
 
-# ========== 配置 ==========
-PORT=3633
-ARGO_DOMAIN="jp.wboo.qzz.io"
-ARGO_TOKEN="eyJhIjoiMmI5NmIx...MzNeSJ9"
-# UUID 和 WS 路径
-VLESS_UUID=$(cat /proc/sys/kernel/random/uuid)
-WS_PATH="/vless"
+=== CONFIG START ===
 
-# ========== 安装依赖 ==========
-apt update && apt install -y curl wget unzip tar xz-utils
+DOMAIN="ddj.wuoo.dpdns.org" HY2_UUID="a0578f92-76b5-4006-b237-51333193fc11" TUIC_UUID="400b397b-e572-4efd-a355-48ea3c8aa4ad" TUIC_TOKEN="aDD4qbgGyfTxkMGtO5zyKA" SINGBOX_VERSION="$(curl -s https://api.github.com/repos/SagerNet/sing-box/releases/latest | grep tag_name | cut -d '"' -f4)"
 
-# ========== 安装 Hysteria2 ==========
-curl -L -o /usr/local/bin/hysteria \
-  https://github.com/apernet/hysteria/releases/latest/download/hysteria-linux-amd64
-chmod +x /usr/local/bin/hysteria
+=== CONFIG END ===
 
-# 下载并安装 sing-box,cloudflared
-install_singbox() {
-    clear
-    purple "正在安装sing-box中，请稍后..."
-    # 判断系统架构
-    ARCH_RAW=$(uname -m)
-    case "${ARCH_RAW}" in
-        'x86_64') ARCH='amd64' ;;
-        'x86' | 'i686' | 'i386') ARCH='386' ;;
-        'aarch64' | 'arm64') ARCH='arm64' ;;
-        'armv7l') ARCH='armv7' ;;
-        's390x') ARCH='s390x' ;;
-        *) red "不支持的架构: ${ARCH_RAW}"; exit 1 ;;
-    esac
+安装依赖
 
-# ========== 配置 systemd 服务 =========#
-## cloudflared (Argo) ##
-cat > /etc/systemd/system/argo.service <<EOF
-[Unit]
-Description=Cloudflare Argo Tunnel (固定)
-After=network.target
+apt update && apt install -y curl unzip socat openssl sudo
 
-[Service]
-ExecStart=/usr/local/bin/cloudflared tunnel --edge-ip-version auto --no-autoupdate \\
-  --hostname ${ARGO_DOMAIN} \\
-  --token ${ARGO_TOKEN} \\
-  --url http://127.0.0.1:8443
-Restart=always
-User=root
-LimitNOFILE=65535
+下载并安装 sing-box
 
-[Install]
-WantedBy=multi-user.target
-EOF
+mkdir -p /etc/sing-box cd /tmp curl -L -o sing-box.zip https://github.com/SagerNet/sing-box/releases/download/${SINGBOX_VERSION}/sing-box-${SINGBOX_VERSION}-linux-amd64.zip unzip sing-box.zip install -m 755 sing-box /usr/local/bin/sing-box
 
-## Sing‑box ##
-mkdir -p /etc/sing-box && cat > /etc/sing-box/config.json <<EOF
-{
-  "log": { "level": "info" },
-  "inbounds": [
-    {
-      "type": "vless",
-      "tag": "vless-in",
-      "listen": "127.0.0.1",
-      "listen_port": 8443,
-      "users": [
-        { "uuid": "${VLESS_UUID}", "flow": "" }
-      ],
-      "tls": { "enabled": false },
-      "transport": {
-        "type": "ws",
-        "path": "${WS_PATH}"
-      }
-    }
-  ],
-  "outbounds": [
-    { "type": "direct", "tag": "direct" }
-  ]
-}
-EOF
+生成自签 TLS
 
-cat > /etc/systemd/system/sing-box.service <<EOF
-[Unit]
-Description=Sing-box VLESS+WS
-After=network.target
+mkdir -p /etc/sing-box/certs openssl req -newkey rsa:2048 -x509 -sha256 -days 3650 -nodes 
+-out /etc/sing-box/certs/cert.pem 
+-keyout /etc/sing-box/certs/private.key 
+-subj "/CN=$DOMAIN"
 
-[Service]
-ExecStart=/usr/local/bin/sing-box run -c /etc/sing-box/config.json
-Restart=always
-User=root
-LimitNOFILE=65535
+创建配置文件
 
-[Install]
-WantedBy=multi-user.target
-EOF
+cat > /etc/sing-box/config.json << EOF { "log": {"level": "info"}, "inbounds": [ { "type": "hysteria2", "tag": "hy2-in", "listen": "0.0.0.0", "listen_port": 443, "tls": { "enabled": true, "certificate_path": "/etc/sing-box/certs/cert.pem", "key_path": "/etc/sing-box/certs/private.key" }, "users": [ {"uuid": "$HY2_UUID"} ] }, { "type": "tuic", "tag": "tuic-in", "listen": "0.0.0.0", "listen_port": 1443, "tls": { "enabled": true, "certificate_path": "/etc/sing-box/certs/cert.pem", "key_path": "/etc/sing-box/certs/private.key" }, "users": [ { "uuid": "$TUIC_UUID", "password": "$TUIC_TOKEN" } ], "congestion_control": "bbr", "zero_rtt_handshake": true } ], "outbounds": [ {"type": "direct", "tag": "direct"}, {"type": "block", "tag": "block"} ] } EOF
 
-## Hysteria2 ##
-mkdir -p /etc/hysteria && cat > /etc/hysteria/config.yaml <<EOF
-listen: :${PORT}
+创建 systemd 服务
 
-tls:
-  disable: true
+cat > /etc/systemd/system/sing-box.service << EOF [Unit] Description=sing-box service After=network.target
 
-auth:
-  type: password
-  password: "pass1234"
+[Service] ExecStart=/usr/local/bin/sing-box run -c /etc/sing-box/config.json Restart=always
 
-protocol: udp
-obfs: "mysecret"
+[Install] WantedBy=multi-user.target EOF
 
-forward:
-  - "127.0.0.1:8443"
-EOF
+启动服务
 
-cat > /etc/systemd/system/hysteria.service <<EOF
-[Unit]
-Description=Hysteria2 Server
-After=network.target
+systemctl daemon-reexec systemctl daemon-reload systemctl enable sing-box systemctl restart sing-box
 
-[Service]
-ExecStart=/usr/local/bin/hysteria server -c /etc/hysteria/config.yaml
-Restart=always
-User=root
-LimitNOFILE=65535
+开放端口
 
-[Install]
-WantedBy=multi-user.target
-EOF
+ufw allow 443/tcp ufw allow 1443/tcp
 
-# ========== 启动服务 ==========
-systemctl daemon-reload
-systemctl enable argo sing-box hysteria
-systemctl restart argo sing-box hysteria
+echo "\n✅ sing-box 已成功部署 (hy2 + tuic)！" echo "  - HY2 端口: 443" echo "  - TUIC v5 端口: 1443" echo "  - 自签 TLS 已生成于 /etc/sing-box/certs/" echo "\n📂 客户端配置将随后提供。"
 
-# ========== 输出信息 ==========
-echo -e "\n✅ 部署完成！"
-echo -e "Argo 隧道 地址：${ARGO_DOMAIN}"
-echo -e "Hysteria2 端口：${PORT}, 密码：pass1234, obfs：mysecret"
-echo -e "Sing-box VLESS + WS：ws://${ARGO_DOMAIN}/${WS_PATH}"
-echo -e "UUID：${VLESS_UUID}"
