@@ -18,12 +18,12 @@ curl -L -o /usr/local/bin/hysteria \
 chmod +x /usr/local/bin/hysteria
 
 # ========== 安装 Sing-box ==========
-curl -L -o sing-box.tar.gz \
-  https://github.com/SagerNet/sing-box/releases/latest/download/sing-box-linux-amd64.tar.gz
-tar -xzf sing-box.tar.gz
-mv sing-box /usr/local/bin/
+SINGBOX_VER=$(curl -s https://api.github.com/repos/SagerNet/sing-box/releases/latest | grep tag_name | cut -d '"' -f4)
+curl -LO https://github.com/SagerNet/sing-box/releases/download/${SINGBOX_VER}/sing-box-${SINGBOX_VER#v}-linux-amd64.tar.gz
+tar -xzf sing-box-*.tar.gz
+mv sing-box-*/sing-box /usr/local/bin/
 chmod +x /usr/local/bin/sing-box
-rm sing-box.tar.gz
+rm -rf sing-box-*tar.gz sing-box-*/
 
 # ========== 安装 cloudflared ==========
 curl -L -o cloudflared.tgz \
